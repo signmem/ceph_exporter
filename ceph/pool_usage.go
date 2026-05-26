@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -76,7 +78,7 @@ func NewPoolUsageCollector(exporter *Exporter) *PoolUsageCollector {
 	)
 
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	// labels["cluster"] = exporter.Cluster
 
 	return &PoolUsageCollector{
 		conn:   exporter.Conn,
@@ -85,7 +87,7 @@ func NewPoolUsageCollector(exporter *Exporter) *PoolUsageCollector {
 		UsedBytes: prometheus.NewDesc(fmt.Sprintf("%s_%s_used_bytes", cephNamespace, subSystem), "Capacity of the pool that is currently under use",
 			poolLabel, labels,
 		),
-		RawUsedBytes: prometheus.NewDesc(fmt.Sprintf("%s_%s_raw_used_bytes", cephNamespace, subSystem), "Raw capacity of the pool that is currently under use, this factors in the size",
+		RawUsedBytes: prometheus.NewDesc(fmt.Sprintf("%s_pool_stored_raw", cephNamespace), "Raw capacity of the pool that is currently under use, this factors in the size",
 			poolLabel, labels,
 		),
 		MaxAvail: prometheus.NewDesc(fmt.Sprintf("%s_%s_available_bytes", cephNamespace, subSystem), "Free space for the pool",
@@ -209,12 +211,42 @@ func (p *PoolUsageCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- p.WriteBytes
 }
 
+
+/*
 // Collect extracts the current values of all the metrics and sends them to the
 // prometheus channel.
 func (p *PoolUsageCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
 	p.logger.Debug("collecting pool usage metrics")
 	if err := p.collect(ch); err != nil {
 		p.logger.WithError(err).Error("error collecting pool usage metrics")
+		return
+	}
+}
+*/
+
+
+// Collect extracts the current values of all the metrics and sends them to the
+// prometheus channel.
+func (p *PoolUsageCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 超时 8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		p.logger.Debug("collecting pool usage metrics")
+		if err := p.collect(ch); err != nil {
+			p.logger.WithError(err).Error("error collecting pool usage metrics")
+		}
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		p.logger.Warn("⚠️ PoolUsage collector timed out after 8s, skipping this scrape")
 		return
 	}
 }

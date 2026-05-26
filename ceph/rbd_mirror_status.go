@@ -17,6 +17,8 @@ package ceph
 import (
 	"encoding/json"
 	"os/exec"
+	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -77,7 +79,7 @@ var rbdMirrorStatus = func(config string, user string) ([]byte, error) {
 // NewRbdMirrorStatusCollector creates a new RbdMirrorStatusCollector instance
 func NewRbdMirrorStatusCollector(exporter *Exporter) *RbdMirrorStatusCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	// labels["cluster"] = exporter.Cluster
 
 	collector := &RbdMirrorStatusCollector{
 		config:  exporter.Config,
@@ -154,6 +156,8 @@ func (c *RbdMirrorStatusCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect sends all the collected metrics Prometheus.
 func (c *RbdMirrorStatusCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
 	status, err := rbdMirrorStatus(c.config, c.user)
@@ -176,4 +180,46 @@ func (c *RbdMirrorStatusCollector) Collect(ch chan<- prometheus.Metric, version 
 		ch <- metric
 	}
 
+}
+*/
+
+
+func (c *RbdMirrorStatusCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 🔥 超时控制 8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		status, err := rbdMirrorStatus(c.config, c.user)
+		if err != nil {
+			c.logger.WithError(err).Error("failed to run 'rbd mirror pool status'")
+		}
+		var rbdStatus rbdMirrorPoolStatus
+		if err = json.Unmarshal(status, &rbdStatus); err != nil {
+			c.logger.WithError(err).Error("failed to Unmarshal rbd mirror pool status output")
+		}
+
+		c.RbdMirrorStatus.Set(c.mirrorStatusStringToInt(rbdStatus.Summary.Health))
+		c.version = version
+
+		if c.version.IsAtLeast(Pacific) {
+			c.RbdMirrorDaemonStatus.Set(c.mirrorStatusStringToInt(rbdStatus.Summary.DaemonHealth))
+			c.RbdMirrorImageStatus.Set(c.mirrorStatusStringToInt(rbdStatus.Summary.ImageHealth))
+		}
+		for _, metric := range c.metricsList() {
+			ch <- metric
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		c.logger.Warn("⚠️ RbdMirrorStatus collector timed out after 8s, skipping this scrape")
+		return
+	}
 }

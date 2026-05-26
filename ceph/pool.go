@@ -20,6 +20,8 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -72,7 +74,7 @@ func NewPoolInfoCollector(exporter *Exporter) *PoolInfoCollector {
 	)
 
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	// labels["cluster"] = exporter.Cluster
 
 	return &PoolInfoCollector{
 		conn:   exporter.Conn,
@@ -275,6 +277,9 @@ func (p *PoolInfoCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+
+/*
 // Collect extracts the current values of all the metrics and sends them to the
 // prometheus channel.
 func (p *PoolInfoCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
@@ -288,6 +293,43 @@ func (p *PoolInfoCollector) Collect(ch chan<- prometheus.Metric, version *Versio
 		metric.Collect(ch)
 	}
 }
+*/
+
+
+// Collect extracts the current values of all the metrics and sends them to the
+// prometheus channel.
+func (p *PoolInfoCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 超时控制 8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		p.logger.Debug("collecting pool metrics")
+		if err := p.collect(); err != nil {
+			p.logger.WithError(err).Error("error collecting pool metrics")
+		}
+
+		for _, metric := range p.collectorList() {
+			metric.Collect(ch)
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		p.logger.Warn("⚠️ PoolInfo collector timed out after 8s, skipping this scrape")
+		return
+	}
+}
+
+
+
+
 
 func (p *PoolInfoCollector) getExpansionFactor(pool poolInfo) float64 {
 	ef, err := p.getECExpansionFactor(pool)

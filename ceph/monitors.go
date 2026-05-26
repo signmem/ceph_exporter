@@ -17,6 +17,8 @@ package ceph
 import (
 	"encoding/json"
 	"regexp"
+	"context"
+	"time"
 
 	"github.com/Jeffail/gabs"
 	"github.com/prometheus/client_golang/prometheus"
@@ -60,7 +62,7 @@ type MonitorCollector struct {
 // the individual metrics that show information about the monitor processes.
 func NewMonitorCollector(exporter *Exporter) *MonitorCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	//labels["cluster"] = exporter.Cluster
 
 	return &MonitorCollector{
 		conn:   exporter.Conn,
@@ -99,7 +101,8 @@ func NewMonitorCollector(exporter *Exporter) *MonitorCollector {
 				Help:        "Counts of current versioned daemons, parsed from `ceph versions`",
 				ConstLabels: labels,
 			},
-			[]string{"daemon", "version_tag", "sha1", "release_name"},
+			// []string{"daemon", "version_tag", "sha1", "release_name"},
+			[]string{"daemon"},
 		),
 		CephFeatures: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -108,7 +111,8 @@ func NewMonitorCollector(exporter *Exporter) *MonitorCollector {
 				Help:        "Counts of current client features, parsed from `ceph features`",
 				ConstLabels: labels,
 			},
-			[]string{"daemon", "release", "features"},
+			// []string{"daemon", "release", "features"},
+			[]string{"daemon"},
 		),
 	}
 }
@@ -277,24 +281,26 @@ func (m *MonitorCollector) collect() error {
 	// Ceph versions, one loop for each daemon.
 	// In a consistent cluster, there will only be one iteration (and label set) per daemon.
 	for daemon, vers := range versions {
-		for version, num := range vers {
+		// for version, num := range vers {
+		for _, num := range vers {
 			// We have a version, which is something like the following, how we want to map it
 			// ceph version 12.2.13-30-aabbccdd (c5b1fd521188ddcdedcf6f98ae0e6a02286042f2) luminous (stable)
 			//              version_tag          sha1                                      release_tag
+			/*
 			res := versionRegexp.FindStringSubmatch(version)
 			if len(res) != 4 {
 				m.CephVersions.WithLabelValues(daemon, "unknown", "unknown", "unknown").Set(num)
 				continue
 			}
-
-			m.CephVersions.WithLabelValues(daemon, res[1], res[2], res[3]).Set(float64(num))
+			*/
+			m.CephVersions.WithLabelValues(daemon).Set(float64(num))
 		}
 	}
 
 	// Ceph features, generic handling of arbitrary daemons
 	for daemon, groups := range features {
 		for _, group := range groups {
-			m.CephFeatures.WithLabelValues(daemon, group.Release, group.Features).Set(float64(group.Num))
+			m.CephFeatures.WithLabelValues(daemon).Set(float64(group.Num))
 		}
 	}
 
@@ -346,6 +352,8 @@ func (m *MonitorCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect extracts the given metrics from the Monitors and sends it to the prometheus
 // channel.
 func (m *MonitorCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
@@ -361,5 +369,44 @@ func (m *MonitorCollector) Collect(ch chan<- prometheus.Metric, version *Version
 
 	for _, metric := range m.metricsList() {
 		ch <- metric
+	}
+}
+*/
+
+
+// Collect extracts the given metrics from the Monitors and sends it to the prometheus
+// channel.
+func (m *MonitorCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 增加 Monitor 独立超时：8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		m.logger.Debug("collecting ceph monitor metrics")
+		if err := m.collect(); err != nil {
+			m.logger.WithError(err).Error("error collecting ceph monitor metrics")
+		}
+
+		// 输出指标
+		for _, metric := range m.collectorList() {
+			metric.Collect(ch)
+		}
+
+		for _, metric := range m.metricsList() {
+			ch <- metric
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+		// 正常完成
+	case <-ctx.Done():
+		m.logger.Warn("⚠️ Monitor collector timed out after 8s, skipping this scrape")
+		return
 	}
 }

@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"context"
+	"time"
 )
 
 var (
@@ -39,7 +41,7 @@ type CrashesCollector struct {
 // NewCrashesCollector creates a new CrashesCollector instance
 func NewCrashesCollector(exporter *Exporter) *CrashesCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	//labels["cluster"] = exporter.Cluster
 
 	collector := &CrashesCollector{
 		conn:   exporter.Conn,
@@ -102,6 +104,8 @@ func (c *CrashesCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.crashReportsDesc
 }
 
+
+/*
 // Collect sends all the collected metrics Prometheus.
 func (c *CrashesCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
 	crashes, err := c.getCrashLs()
@@ -118,5 +122,42 @@ func (c *CrashesCollector) Collect(ch chan<- prometheus.Metric, version *Version
 			crash.hostname,
 			statusNames[crash.isNew],
 		)
+	}
+}
+*/
+
+func (c *CrashesCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 超时控制 8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		crashes, err := c.getCrashLs()
+		if err != nil {
+			c.logger.WithError(err).Error("failed to run 'ceph crash ls'")
+		}
+
+		for crash, count := range crashes {
+			ch <- prometheus.MustNewConstMetric(
+				c.crashReportsDesc,
+				prometheus.GaugeValue,
+				float64(count),
+				crash.entity,
+				crash.hostname,
+				statusNames[crash.isNew],
+			)
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		c.logger.Warn("⚠️ Crashes collector timed out after 8s, skipping this scrape")
+		return
 	}
 }
