@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"log"
 	"bytes"
-
+	"context"
+	"time"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -542,6 +543,8 @@ func (o *OSDCollector) Describe(ch chan<- *prometheus.Desc) {
 
 }
 
+
+/*
 // Collect sends all the collected metrics to the provided prometheus channel.
 // It requires the caller to handle synchronization.
 func (o *OSDCollector) Collect(ch chan<- prometheus.Metric) {
@@ -562,4 +565,42 @@ func (o *OSDCollector) Collect(ch chan<- prometheus.Metric) {
 		metric.Collect(ch)
 	}
 
+}
+*/
+
+
+func (o *OSDCollector) Collect(ch chan<- prometheus.Metric) {
+	// 🔥8 秒超时保护
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		if err := o.collectOSDPerf(); err != nil {
+			log.Println("failed collecting osd perf stats:", err)
+		}
+
+		if err := o.collectOSDDump(); err != nil {
+			log.Println("failed collecting osd dump:", err)
+		}
+
+		if err := o.collect(); err != nil {
+			log.Println("failed collecting osd metrics:", err)
+		}
+
+		for _, metric := range o.collectorList() {
+			metric.Collect(ch)
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Println("[WARN] OSD collector timed out after 8s, skipping this scrape")
+		return
+	}
 }

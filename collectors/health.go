@@ -23,7 +23,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
+	"context"
+	"time"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -173,6 +174,7 @@ const (
 	// manual intervention.
 	CephHealthErr = "HEALTH_ERR"
 )
+
 
 // NewClusterHealthCollector creates a new instance of ClusterHealthCollector to collect health
 // metrics on.
@@ -980,6 +982,9 @@ func (c *ClusterHealthCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+
+/*
 // Collect sends all the collected metrics to the provided prometheus channel.
 // It requires the caller to handle synchronization.
 func (c *ClusterHealthCollector) Collect(ch chan<- prometheus.Metric) {
@@ -993,5 +998,40 @@ func (c *ClusterHealthCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, metric := range c.metricsList() {
 		ch <- metric
+	}
+}
+*/
+
+
+// Collect sends all the collected metrics to the provided prometheus channel.
+// It requires the caller to handle synchronization.
+func (c *ClusterHealthCollector) Collect(ch chan<- prometheus.Metric) {
+	// 8 秒超时保护
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		if err := c.collect(); err != nil {
+			log.Println("failed collecting cluster health metrics:", err)
+		}
+
+		if err := c.collectRecoveryClientIO(); err != nil {
+			log.Println("failed collecting cluster recovery/client io:", err)
+		}
+
+		for _, metric := range c.metricsList() {
+			ch <- metric
+		}
+
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Println("[WARN] ClusterHealth collector timed out after 8s, skipping this scrape")
+		return
 	}
 }

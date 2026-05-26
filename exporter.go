@@ -186,12 +186,33 @@ func main() {
 	// Below is essentially http.ListenAndServe(), but using our custom
 	// emfileAwareTcpListener that will die if we run out of file descriptors
 	ln, err := net.Listen("tcp", *addr)
+
+	/*
 	if err == nil {
 		err := http.Serve(emfileAwareTcpListener{ln.(*net.TCPListener)}, nil)
 		if err != nil {
 			log.Fatalf("unable to serve requests: %s", err)
 		}
 	}
+	*/
+
+
+	if err == nil {
+		// 增加 HTTP 服务超时，彻底防止接口挂死
+		server := &http.Server{
+			ReadTimeout:  5 * time.Second,   // 读取请求超时
+			WriteTimeout: 15 * time.Second,  // 核心：响应返回超时（15秒强制断开）
+			IdleTimeout:  60 * time.Second,  // 长连接空闲超时
+			Handler:      nil,               // 保持默认，使用已注册的 prometheus handler
+		}
+
+		// 启动服务
+		err = server.Serve(emfileAwareTcpListener{ln.(*net.TCPListener)})
+		if err != nil {
+			log.Fatalf("unable to serve requests: %s", err)
+		}
+	}
+
 	if err != nil {
 		log.Fatalf("unable to create listener: %s", err)
 	}

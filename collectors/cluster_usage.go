@@ -17,7 +17,8 @@ package collectors
 import (
 	"encoding/json"
 	"log"
-
+	"context"
+	"time"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -165,6 +166,8 @@ func (c *ClusterUsageCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect sends the metric values for each metric pertaining to the global
 // cluster usage over to the provided prometheus Metric channel.
 func (c *ClusterUsageCollector) Collect(ch chan<- prometheus.Metric) {
@@ -175,5 +178,35 @@ func (c *ClusterUsageCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, metric := range c.metricsList() {
 		ch <- metric
+	}
+}
+*/
+
+// Collect sends the metric values for each metric pertaining to the global
+// cluster usage over to the provided prometheus Metric channel.
+func (c *ClusterUsageCollector) Collect(ch chan<- prometheus.Metric) {
+	// 8 秒超时保护
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		if err := c.collect(); err != nil {
+			log.Println("[ERROR] failed collecting cluster usage metrics:", err)
+		}
+
+		for _, metric := range c.metricsList() {
+			ch <- metric
+		}
+
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Println("[WARN] ClusterUsage collector timed out after 8s, skipping this scrape")
+		return
 	}
 }

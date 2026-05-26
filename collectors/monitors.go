@@ -17,7 +17,8 @@ package collectors
 import (
 	"encoding/json"
 	"log"
-
+	"context"
+	"time"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -348,6 +349,8 @@ func (m *MonitorCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect extracts the given metrics from the Monitors and sends it to the prometheus
 // channel.
 func (m *MonitorCollector) Collect(ch chan<- prometheus.Metric) {
@@ -362,5 +365,38 @@ func (m *MonitorCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, metric := range m.metricsList() {
 		ch <- metric
+	}
+}
+*/
+
+func (m *MonitorCollector) Collect(ch chan<- prometheus.Metric) {
+	// 🔥8 秒超时，防止 Ceph mon 卡住导致 exporter 无响应
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		if err := m.collect(); err != nil {
+			log.Println("failed collecting monitor metrics:", err)
+		}
+
+		for _, metric := range m.collectorList() {
+			metric.Collect(ch)
+		}
+
+		for _, metric := range m.metricsList() {
+			ch <- metric
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Println("[WARN] Monitor collector timed out after 8s, skipping this scrape")
+		return
 	}
 }

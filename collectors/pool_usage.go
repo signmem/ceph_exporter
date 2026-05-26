@@ -17,7 +17,8 @@ package collectors
 import (
 	"encoding/json"
 	"log"
-
+	"context"
+	"time"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -247,6 +248,8 @@ func (p *PoolUsageCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect extracts the current values of all the metrics and sends them to the
 // prometheus channel.
 func (p *PoolUsageCollector) Collect(ch chan<- prometheus.Metric) {
@@ -257,5 +260,33 @@ func (p *PoolUsageCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, metric := range p.collectorList() {
 		metric.Collect(ch)
+	}
+}
+*/
+
+func (p *PoolUsageCollector) Collect(ch chan<- prometheus.Metric) {
+	//  8秒超时，防止卡住 exporter
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		if err := p.collect(); err != nil {
+			log.Println("[ERROR] failed collecting pool usage metrics:", err)
+		}
+
+		for _, metric := range p.collectorList() {
+			metric.Collect(ch)
+		}
+
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Println("[WARN] PoolUsage collector timed out after 8s, skipping this scrape")
+		return
 	}
 }
