@@ -178,7 +178,7 @@ const (
 // metrics on.
 func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = cluster
+	// labels["cluster"] = cluster
 
 	return &ClusterHealthCollector{
 		conn: conn,
@@ -194,7 +194,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		TotalPGs: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "total_pgs",
+				Name:        "active_pgs",
 				Help:        "Total no. of PGs in the cluster",
 				ConstLabels: labels,
 			},

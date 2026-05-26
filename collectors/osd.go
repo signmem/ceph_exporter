@@ -74,7 +74,7 @@ type OSDCollector struct {
 // the individual metrics that show information about the OSD.
 func NewOSDCollector(conn Conn, cluster string) *OSDCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = cluster
+	// labels["cluster"] = cluster
 
 	return &OSDCollector{
 		conn: conn,

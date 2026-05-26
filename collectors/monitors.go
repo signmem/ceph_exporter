@@ -79,7 +79,7 @@ type Store struct {
 // the individual metrics that show information about the monitor processes.
 func NewMonitorCollector(conn Conn, cluster string) *MonitorCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = cluster
+	// labels["cluster"] = cluster
 
 	return &MonitorCollector{
 		conn: conn,

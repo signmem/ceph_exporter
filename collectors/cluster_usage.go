@@ -51,7 +51,7 @@ type ClusterUsageCollector struct {
 // and internally defines each metric that display cluster stats.
 func NewClusterUsageCollector(conn Conn, cluster string) *ClusterUsageCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = cluster
+	// labels["cluster"] = cluster
 
 	return &ClusterUsageCollector{
 		conn: conn,

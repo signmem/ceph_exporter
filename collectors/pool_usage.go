@@ -68,7 +68,7 @@ func NewPoolUsageCollector(conn Conn, cluster string) *PoolUsageCollector {
 	)
 
 	labels := make(prometheus.Labels)
-	labels["cluster"] = cluster
+	// labels["cluster"] = cluster
 
 	return &PoolUsageCollector{
 		conn: conn,

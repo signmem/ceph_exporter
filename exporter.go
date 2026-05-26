@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/ceph/go-ceph/rados"
-	"github.com/digitalocean/ceph_exporter/collectors"
+	"github.com/signmem/ceph_exporter/collectors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -106,6 +106,7 @@ func (c *CephExporter) Collect(ch chan<- prometheus.Metric) {
 
 func main() {
 	var (
+		versionExporter  = "1.0.0-ceph-10"
 		addr        = flag.String("telemetry.addr", ":9128", "host:port for ceph exporter")
 		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
 		cephConfig  = flag.String("ceph.config", "", "path to ceph config file")
@@ -180,6 +181,7 @@ func main() {
 			</html>`))
 	})
 
+	log.Printf("version %s", versionExporter)
 	log.Printf("Starting ceph exporter on %q", *addr)
 	// Below is essentially http.ListenAndServe(), but using our custom
 	// emfileAwareTcpListener that will die if we run out of file descriptors
