@@ -37,6 +37,7 @@ const (
 	defaultCephConfigPath   = "/etc/ceph/ceph.conf"
 	defaultCephUser         = "admin"
 	defaultRadosOpTimeout   = 30 * time.Second
+	exporterVersion		= "1.0.0 for ceph-12"
 )
 
 // This horrible thing is a copy of tcpKeepAliveListener, tweaked to
@@ -92,6 +93,8 @@ func main() {
 	logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
+
+	logger.Infof("version %s", exporterVersion)
 
 	if v, err := logrus.ParseLevel(*logLevel); err != nil {
 		logger.WithError(err).Warn("error setting log level")
