@@ -1,4 +1,4 @@
-module github.com/digitalocean/ceph_exporter
+module github.com/signmem/ceph_exporter
 
 go 1.20
 
