@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -284,7 +286,7 @@ const (
 // metrics on.
 func NewClusterHealthCollector(exporter *Exporter) *ClusterHealthCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	// labels["cluster"] = exporter.Cluster
 
 	collector := &ClusterHealthCollector{
 		conn:   exporter.Conn,
@@ -1332,6 +1334,9 @@ func (c *ClusterHealthCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+
+/*
 // Collect sends all the collected metrics to the provided prometheus channel.
 // It requires the caller to handle synchronization.
 func (c *ClusterHealthCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
@@ -1361,5 +1366,55 @@ func (c *ClusterHealthCollector) Collect(ch chan<- prometheus.Metric, version *V
 
 	for _, metric := range c.collectorsList() {
 		metric.Collect(ch)
+	}
+}
+*/
+
+
+func (c *ClusterHealthCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 超时控制 8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		wg := &sync.WaitGroup{}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			c.logger.Debug("collecting cluster health metrics")
+			if err := c.collect(ch, version); err != nil {
+				c.logger.WithError(err).Error("error collecting cluster health metrics " + err.Error())
+			}
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			c.logger.Debug("collecting cluster recovery/client I/O metrics")
+			if err := c.collectRecoveryClientIO(ch); err != nil {
+				c.logger.WithError(err).Error("error collecting cluster recovery/client I/O metrics")
+			}
+		}()
+
+		wg.Wait()
+
+		for _, metric := range c.collectorsList() {
+			metric.Collect(ch)
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		c.logger.Warn("⚠️ ClusterHealth collector timed out after 8s, skipping this scrape")
+		return
 	}
 }

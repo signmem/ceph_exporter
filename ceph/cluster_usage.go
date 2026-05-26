@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"context"
+	"time"
 )
 
 const (
@@ -50,7 +52,7 @@ type ClusterUsageCollector struct {
 // cluster stats.
 func NewClusterUsageCollector(exporter *Exporter) *ClusterUsageCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	//labels["cluster"] = exporter.Cluster
 
 	return &ClusterUsageCollector{
 		conn:   exporter.Conn,
@@ -137,6 +139,8 @@ func (c *ClusterUsageCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect sends the metric values for each metric pertaining to the global
 // cluster usage over to the provided prometheus Metric channel.
 func (c *ClusterUsageCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
@@ -148,5 +152,38 @@ func (c *ClusterUsageCollector) Collect(ch chan<- prometheus.Metric, version *Ve
 
 	for _, metric := range c.metricsList() {
 		ch <- metric
+	}
+}
+*/
+
+
+// Collect sends the metric values for each metric pertaining to the global
+// cluster usage over to the provided prometheus Metric channel.
+func (c *ClusterUsageCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 增加集群使用量采集超时：8秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		c.logger.Debug("collecting cluster usage metrics")
+		if err := c.collect(); err != nil {
+			c.logger.WithError(err).Error("error collecting cluster usage metrics")
+		}
+
+		for _, metric := range c.metricsList() {
+			ch <- metric
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		c.logger.Warn("⚠️ ClusterUsage collector timed out after 8s, skipping this scrape")
+		return
 	}
 }

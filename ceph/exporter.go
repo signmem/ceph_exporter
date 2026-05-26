@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"context"
+	"time"
 
 	"github.com/Jeffail/gabs"
 	"github.com/prometheus/client_golang/prometheus"
@@ -76,7 +78,7 @@ func (exporter *Exporter) initCollectors() map[string]versionedCollector {
 		"clusterHealth": NewClusterHealthCollector(exporter),
 		"mon":           NewMonitorCollector(exporter),
 		"osd":           NewOSDCollector(exporter),
-		"crashes":       NewCrashesCollector(exporter),
+		// "crashes":       NewCrashesCollector(exporter),
 	}
 
 	switch exporter.RgwMode {
@@ -238,7 +240,10 @@ func (exporter *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // Collect sends the collected metrics from each of the collectors to
 // prometheus. Collect could be called several times concurrently
 // and thus its run is protected by a single mutex.
+
+/*
 func (exporter *Exporter) Collect(ch chan<- prometheus.Metric) {
+
 	exporter.mu.Lock()
 	defer exporter.mu.Unlock()
 
@@ -263,4 +268,56 @@ func (exporter *Exporter) Collect(ch chan<- prometheus.Metric) {
 		}(cc, wg)
 	}
 	wg.Wait()
+}
+*/
+
+func (exporter *Exporter) Collect(ch chan<- prometheus.Metric) {
+	exporter.mu.Lock()
+	defer exporter.mu.Unlock()
+
+	// 1. 基础检查
+	err := exporter.setCephVersion()
+	if err != nil {
+		exporter.Logger.WithError(err).Error("failed to set ceph Version")
+		return
+	}
+
+	err = exporter.setRbdMirror()
+	if err != nil {
+		exporter.Logger.WithError(err).Error("failed to set rbd mirror")
+		return
+	}
+
+	// 核心：全局采集超时 10 秒
+	// 超过时间直接返回，不再等待卡住的 Ceph 响应
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 用于等待所有采集完成
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	go func() {
+		for _, cc := range exporter.cc {
+			wg.Add(1)
+			go func(c versionedCollector) {
+				defer wg.Done()
+				c.Collect(ch, exporter.Version)
+			}(cc)
+		}
+
+		wg.Wait()
+		close(done)
+	}()
+
+	// 等待 完成 或 超时
+	select {
+	case <-done:
+		// 正常完成
+		exporter.Logger.Debug("all collectors finished successfully")
+	case <-ctx.Done():
+		// 超时！直接返回，避免接口卡死
+		exporter.Logger.Warn("⚠️ collect timeout after 10s, skip this scrape (ceph may be stuck)")
+		return
+	}
 }

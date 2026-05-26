@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -94,7 +95,7 @@ type RGWCollector struct {
 // the individual metrics that we can collect from the RGW service
 func NewRGWCollector(exporter *Exporter, background bool) *RGWCollector {
 	labels := make(prometheus.Labels)
-	labels["cluster"] = exporter.Cluster
+	//labels["cluster"] = exporter.Cluster
 
 	rgw := &RGWCollector{
 		config:           exporter.Config,
@@ -216,6 +217,8 @@ func (r *RGWCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
+
+/*
 // Collect sends all the collected metrics to the provided prometheus channel.
 // It requires the caller to handle synchronization.
 func (r *RGWCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
@@ -229,5 +232,38 @@ func (r *RGWCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
 
 	for _, metric := range r.collectorList() {
 		metric.Collect(ch)
+	}
+}
+*/
+
+func (r *RGWCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
+	// 🔥控制 8 秒
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		if !r.background {
+			r.logger.WithField("background", r.background).Debug("collecting RGW GC stats")
+			err := r.collect()
+			if err != nil {
+				r.logger.WithField("background", r.background).WithError(err).Error("error collecting RGW GC stats")
+			}
+		}
+
+		for _, metric := range r.collectorList() {
+			metric.Collect(ch)
+		}
+
+		close(done)
+	}()
+
+	// 等待完成 或 超时
+	select {
+	case <-done:
+	case <-ctx.Done():
+		r.logger.Warn("⚠️ RGW collector timed out after 8s, skipping this scrape")
+		return
 	}
 }
