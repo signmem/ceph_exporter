@@ -28,8 +28,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 
-	"github.com/digitalocean/ceph_exporter/ceph"
-	"github.com/digitalocean/ceph_exporter/rados"
+	"github.com/signmem/ceph_exporter/ceph"
+	"github.com/signmem/ceph_exporter/rados"
 )
 
 const (
@@ -70,7 +70,7 @@ var _ prometheus.Collector = &ceph.Exporter{}
 
 func main() {
 	var (
-		metricsAddr    = envflag.String("TELEMETRY_ADDR", ":9128", "Host:Port for ceph_exporter's metrics endpoint")
+		metricsAddr    = envflag.String("TELEMETRY_ADDR", ":9283", "Host:Port for ceph_exporter's metrics endpoint")
 		metricsPath    = envflag.String("TELEMETRY_PATH", "/metrics", "URL path for surfacing metrics to Prometheus")
 		exporterConfig = envflag.String("EXPORTER_CONFIG", "/etc/ceph/exporter.yml", "Path to ceph_exporter config")
 		rgwMode        = envflag.Int("RGW_MODE", 0, "Enable collection of stats from RGW (0:disabled 1:enabled 2:background)")
@@ -163,6 +163,9 @@ func main() {
 
 	if len(*tlsCertPath) != 0 && len(*tlsKeyPath) != 0 {
 		server := &http.Server{
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 15 * time.Second, 
+			IdleTimeout:  60 * time.Second,
 			TLSConfig: &tls.Config{
 				GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 					caFiles, err := tls.LoadX509KeyPair(*tlsCertPath, *tlsKeyPath)
