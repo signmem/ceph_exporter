@@ -73,7 +73,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		TotalPGs: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "active_pgs",
+				Name:        "pg_active",
 				Help:        "Total no. of PGs in the cluster",
 				ConstLabels: labels,
 			},
@@ -81,7 +81,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		OSDsUp: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osds_up",
+				Name:        "osd_up",
 				Help:        "Count of OSDs that are in UP state",
 				ConstLabels: labels,
 			},
@@ -89,7 +89,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		OSDsIn: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osds_in",
+				Name:        "osd_in",
 				Help:        "Count of OSDs that are in IN state",
 				ConstLabels: labels,
 			},
@@ -97,7 +97,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		OSDsNum: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osds",
+				Name:        "osd_metadata",
 				Help:        "Count of total OSDs in the cluster",
 				ConstLabels: labels,
 			},
@@ -105,7 +105,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		RecoveryIORate: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "recovery_io_bytes",
+				Name:        "osd_recovery_bytes",
 				Help:        "Rate of bytes being recovered in cluster per second",
 				ConstLabels: labels,
 			},
@@ -129,7 +129,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		ClientIORead: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "client_io_read_bytes",
+				Name:        "osd_op_r_out_bytes",
 				Help:        "Rate of bytes being read by all clients per second",
 				ConstLabels: labels,
 			},
@@ -137,7 +137,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		ClientIOWrite: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "client_io_write_bytes",
+				Name:        "osd_op_w_in_bytes",
 				Help:        "Rate of bytes being written by all clients per second",
 				ConstLabels: labels,
 			},
@@ -153,7 +153,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		ClientIOReadOps: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "client_io_read_ops",
+				Name:        "osd_op_r",
 				Help:        "Client read I/O ops per second",
 				ConstLabels: labels,
 			},
@@ -161,7 +161,7 @@ func NewClusterHealthCollector(conn Conn, cluster string) *ClusterHealthCollecto
 		ClientIOWriteOps: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "client_io_write_ops",
+				Name:        "osd_op_w",
 				Help:        "Client write I/O ops per second",
 				ConstLabels: labels,
 			},

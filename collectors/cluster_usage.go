@@ -59,13 +59,13 @@ func NewClusterUsageCollector(conn Conn, cluster string) *ClusterUsageCollector 
 
 		GlobalCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace:   cephNamespace,
-			Name:        "cluster_capacity_bytes",
+			Name:        "cluster_total_bytes",
 			Help:        "Total capacity of the cluster",
 			ConstLabels: labels,
 		}),
 		UsedCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace:   cephNamespace,
-			Name:        "cluster_used_bytes",
+			Name:        "cluster_total_used_bytes",
 			Help:        "Capacity of the cluster currently in use",
 			ConstLabels: labels,
 		}),

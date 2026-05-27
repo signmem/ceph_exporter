@@ -88,7 +88,7 @@ func NewPoolUsageCollector(conn Conn, cluster string) *PoolUsageCollector {
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
 				Subsystem:   subSystem,
-				Name:        "raw_used_bytes",
+				Name:        "stored_raw",
 				Help:        "Raw capacity of the pool that is currently under use, this factors in the size",
 				ConstLabels: labels,
 			},
@@ -128,7 +128,7 @@ func NewPoolUsageCollector(conn Conn, cluster string) *PoolUsageCollector {
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
 				Subsystem:   subSystem,
-				Name:        "read_total",
+				Name:        "rd",
 				Help:        "Total read i/o calls for the pool",
 				ConstLabels: labels,
 			},
@@ -138,7 +138,7 @@ func NewPoolUsageCollector(conn Conn, cluster string) *PoolUsageCollector {
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
 				Subsystem:   subSystem,
-				Name:        "read_bytes_total",
+				Name:        "rd_bytes",
 				Help:        "Total read throughput for the pool",
 				ConstLabels: labels,
 			},
@@ -148,7 +148,7 @@ func NewPoolUsageCollector(conn Conn, cluster string) *PoolUsageCollector {
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
 				Subsystem:   subSystem,
-				Name:        "write_total",
+				Name:        "wr",
 				Help:        "Total write i/o calls for the pool",
 				ConstLabels: labels,
 			},
@@ -158,7 +158,7 @@ func NewPoolUsageCollector(conn Conn, cluster string) *PoolUsageCollector {
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
 				Subsystem:   subSystem,
-				Name:        "write_bytes_total",
+				Name:        "wr_bytes",
 				Help:        "Total write throughput for the pool",
 				ConstLabels: labels,
 			},

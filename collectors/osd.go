@@ -31,21 +31,21 @@ func NewOSDCollector(conn Conn, cluster string) *OSDCollector {
 		CommitLatency: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osd_perf_commit_latency_seconds",
+				Name:        "osd_commit_latency_ms",
 				Help:        "OSD Perf Commit Latency",
 				ConstLabels: labels,
 			},
-			[]string{"osd"},
+			[]string{"ceph_daemon"},
 		),
 
 		ApplyLatency: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osd_perf_apply_latency_seconds",
+				Name:        "osd_apply_latency_ms",
 				Help:        "OSD Perf Apply Latency",
 				ConstLabels: labels,
 			},
-			[]string{"osd"},
+			[]string{"ceph_daemon"},
 		),
 	}
 }
@@ -91,13 +91,13 @@ func (o *OSDCollector) collectOSDPerf() error {
 		if err != nil {
 			return err
 		}
-		o.CommitLatency.WithLabelValues(osdName).Set(commitLatency / 1e3)
+		o.CommitLatency.WithLabelValues(osdName).Set(commitLatency)
 
 		applyLatency, err := perfStat.Stats.ApplyLatency.Float64()
 		if err != nil {
 			return err
 		}
-		o.ApplyLatency.WithLabelValues(osdName).Set(applyLatency / 1e3)
+		o.ApplyLatency.WithLabelValues(osdName).Set(applyLatency)
 	}
 
 	return nil
