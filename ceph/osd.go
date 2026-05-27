@@ -19,10 +19,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	_ "strconv"
-	"strings"
-	"sync"
 	"context"
+	_ "strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -31,65 +30,15 @@ import (
 
 const (
 	osdLabelFormat = "osd.%v"
-
-	scrubStateIdle          = 0
-	scrubStateScrubbing     = 1
-	scrubStateDeepScrubbing = 2
-
-	oldestInactivePGUpdatePeriod = 10 * time.Second
 )
 
 // OSDCollector displays statistics about OSD in the Ceph cluster.
-// An important aspect of monitoring OSDs is to ensure that when the cluster is
-// up and running that all OSDs that are in the cluster are up and running, too
 type OSDCollector struct {
 	conn   Conn
 	logger *logrus.Logger
 
-	// osdScrubCache holds the cache of previous PG scrubs
-	osdScrubCache map[int]int
-
 	// osdLabelsCache holds a cache of osd labels
 	osdLabelsCache map[int64]*cephOSDLabel
-
-	// oldestInactivePGMap keeps track of how long we've known
-	// a PG to not have an active state in it.
-	oldestInactivePGMap map[string]time.Time
-
-	// CrushWeight is a persistent setting, and it affects how CRUSH assigns data to OSDs.
-	// It displays the CRUSH weight for the OSD
-	// disable crush weight
-	// CrushWeight *prometheus.GaugeVec
-
-	// Depth displays the OSD's level of hierarchy in the CRUSH map
-	// disable depth
-	// Depth *prometheus.GaugeVec
-
-	// Reweight sets an override weight on the OSD.
-	// It displays value within 0 to 1.
-	// Reweight *prometheus.GaugeVec
-
-	// Bytes displays the total bytes available in the OSD
-	// Bytes *prometheus.GaugeVec
-
-	// UsedBytes displays the total used bytes in the OSD
-	// UsedBytes *prometheus.GaugeVec
-
-	// AvailBytes displays the total available bytes in the OSD
-	// AvailBytes *prometheus.GaugeVec
-
-	// Utilization displays current utilization of the OSD
-	// Utilization *prometheus.GaugeVec
-
-	// Variance displays current variance of the OSD from the standard utilization
-	// Variance *prometheus.GaugeVec
-
-	// Pgs displays total number of placement groups in the OSD.
-	// Available in Ceph Jewel version.
-	// Pgs *prometheus.GaugeVec
-
-	// PgUpmapItemsTotal displays the total number of items in the pg-upmap exception table.
-	PgUpmapItemsTotal prometheus.Gauge
 
 	// CommitLatency displays in seconds how long it takes for an operation to be applied to disk
 	CommitLatency *prometheus.GaugeVec
@@ -97,237 +46,28 @@ type OSDCollector struct {
 	// ApplyLatency displays in seconds how long it takes to get applied to the backing filesystem
 	ApplyLatency *prometheus.GaugeVec
 
-	// OSDIn displays the In state of the OSD
-	// OSDIn *prometheus.GaugeVec
-
-	// OSDUp displays the Up state of the OSD
-	// OSDUp *prometheus.GaugeVec
-
-	// OSDMetaData displays metadata of an OSD
-	// OSDMetadata *prometheus.GaugeVec
-
-	// OSDFullRatio displays current full_ratio of OSD
-	// OSDFullRatio prometheus.Gauge
-
-	// OSDFullRatio displays current backfillfull_ratio of OSD
-	// OSDBackfillFullRatio prometheus.Gauge
-
-	// OSDNearFullRatio displays current nearfull_ratio of OSD
-	// OSDNearFullRatio prometheus.Gauge
-
-	// OSDFull flags if an OSD is full
-	// OSDFull *prometheus.GaugeVec
-
-	// OSDNearfull flags if an OSD is near full
-	// OSDNearFull *prometheus.GaugeVec
-
-	// OSDBackfillFull flags if an OSD is backfill full
-	// OSDBackfillFull *prometheus.GaugeVec
-
 	// OSDDownDesc displays OSDs present in the cluster in "down" state
 	OSDDownDesc *prometheus.Desc
 
-	// TotalBytes displays total bytes in all OSDs
-	TotalBytes prometheus.Gauge
-
-	// TotalUsedBytes displays total used bytes in all OSDs
-	TotalUsedBytes prometheus.Gauge
-
-	// TotalAvailBytes displays total available bytes in all OSDs
-	TotalAvailBytes prometheus.Gauge
-
-	// AverageUtil displays average utilization in all OSDs
-	AverageUtil prometheus.Gauge
-
-	// ScrubbingStateDesc depicts if an OSD is being scrubbed
-	// labeled by OSD
-	ScrubbingStateDesc *prometheus.Desc
-
 	// PGObjectsRecoveredDesc displays total number of objects recovered in a PG
 	PGObjectsRecoveredDesc *prometheus.Desc
-
-	// OSDObjectsBackfilled displays average number of objects backfilled in an OSD
-	// OSDObjectsBackfilled *prometheus.CounterVec
-
-	// OldestInactivePG gives us the amount of time that the oldest inactive PG
-	// has been inactive for.  This is useful to discern between rolling peering
-	// (such as when issuing a bunch of upmaps or weight changes) and a single PG
-	// stuck peering, for example.
-	// OldestInactivePG prometheus.Gauge
 }
 
-// NewOSDCollector creates an instance of the OSDCollector and instantiates the
-// individual metrics that show information about the OSD.
+// NewOSDCollector creates an instance of the OSDCollector
 func NewOSDCollector(exporter *Exporter) *OSDCollector {
 	labels := make(prometheus.Labels)
-	// labels["cluster"] = exporter.Cluster
 	osdLabels := []string{"ceph_daemon"}
-	// osdMetadataLabels := []string{"osd", "objectstore", "ceph_version_when_created", "created_at"}
 
 	o := &OSDCollector{
 		conn:   exporter.Conn,
 		logger: exporter.Logger,
 
-		osdScrubCache:       make(map[int]int),
-		osdLabelsCache:      make(map[int64]*cephOSDLabel),
-		oldestInactivePGMap: make(map[string]time.Time),
-
-		/* disable crush weight
-		CrushWeight: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_crush_weight",
-				Help:        "OSD Crush Weight",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable depth
-		Depth: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_depth",
-				Help:        "OSD Depth",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/*  disable reweight
-		Reweight: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_reweight",
-				Help:        "OSD Reweight",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable ceph_osd_bytes
-		Bytes: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_bytes",
-				Help:        "OSD Total Bytes",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable ceph osd use bytes
-		UsedBytes: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_used_bytes",
-				Help:        "OSD Used Storage in Bytes",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable ceph_osd_avail_bytes
-		AvailBytes: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_avail_bytes",
-				Help:        "OSD Available Storage in Bytes",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable osd_utilization
-		Utilization: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_utilization",
-				Help:        "OSD Utilization",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable ceph_osd_variance
-		Variance: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_variance",
-				Help:        "OSD Variance",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable ceph_osd_pgs
-		Pgs: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_pgs",
-				Help:        "OSD Placement Group Count",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		PgUpmapItemsTotal: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_pg_upmap_items_total",
-				Help:        "OSD PG-Upmap Exception Table Entry Count",
-				ConstLabels: labels,
-			},
-		),
-
-		TotalBytes: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_total_bytes",
-				Help:        "OSD Total Storage Bytes",
-				ConstLabels: labels,
-			},
-		),
-		TotalUsedBytes: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_total_used_bytes",
-				Help:        "OSD Total Used Storage Bytes",
-				ConstLabels: labels,
-			},
-		),
-
-		TotalAvailBytes: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_total_avail_bytes",
-				Help:        "OSD Total Available Storage Bytes ",
-				ConstLabels: labels,
-			},
-		),
-
-		AverageUtil: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_average_utilization",
-				Help:        "OSD Average Utilization",
-				ConstLabels: labels,
-			},
-		),
+		osdLabelsCache: make(map[int64]*cephOSDLabel),
 
 		CommitLatency: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osd_perf_commit_latency_seconds",
+				Name:        "osd_commit_latency_ms",
 				Help:        "OSD Perf Commit Latency",
 				ConstLabels: labels,
 			},
@@ -337,121 +77,17 @@ func NewOSDCollector(exporter *Exporter) *OSDCollector {
 		ApplyLatency: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace:   cephNamespace,
-				Name:        "osd_perf_apply_latency_seconds",
+				Name:        "osd_apply_latency_ms",
 				Help:        "OSD Perf Apply Latency",
 				ConstLabels: labels,
 			},
 			osdLabels,
 		),
 
-		/* disable osd_full_ratio
-		OSDIn: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_in",
-				Help:        "OSD In Status",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-
-		OSDUp: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_up",
-				Help:        "OSD Up Status",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-
-		OSDFullRatio: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_full_ratio",
-				Help:        "OSD Full Ratio Value",
-				ConstLabels: labels,
-			},
-		),
-		*/
-
-		/* disable osd_near_full_ratio
-		OSDNearFullRatio: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_near_full_ratio",
-				Help:        "OSD Near Full Ratio Value",
-				ConstLabels: labels,
-			},
-		),
-		*/
-
-		/* disable backfill full ratio
-		OSDBackfillFullRatio: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_backfill_full_ratio",
-				Help:        "OSD Backfill Full Ratio Value",
-				ConstLabels: labels,
-			},
-		),
-		*/
-
-		/* disable ceph osd_full
-		OSDFull: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_full",
-				Help:        "OSD Full Status",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-
-
-		OSDNearFull: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_near_full",
-				Help:        "OSD Near Full Status",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-		*/
-
-		/* disable osd_backfill_full
-		OSDBackfillFull: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_backfill_full",
-				Help:        "OSD Backfill Full Status",
-				ConstLabels: labels,
-			},
-			osdLabels,
-		),
-
-		OSDMetadata: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_metadata",
-				Help:        "OSD Metadata",
-				ConstLabels: labels,
-			},
-			osdMetadataLabels,
-		),
-		*/
-
 		OSDDownDesc: prometheus.NewDesc(
 			fmt.Sprintf("%s_osd_down", cephNamespace),
 			"Number of OSDs down in the cluster",
 			append([]string{"status"}, osdLabels...),
-			labels,
-		),
-		ScrubbingStateDesc: prometheus.NewDesc(
-			fmt.Sprintf("%s_osd_scrub_state", cephNamespace),
-			"State of OSDs involved in a scrub",
-			osdLabels,
 			labels,
 		),
 
@@ -461,79 +97,21 @@ func NewOSDCollector(exporter *Exporter) *OSDCollector {
 			[]string{"pgid"},
 			labels,
 		),
-
-		/*
-		OSDObjectsBackfilled: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace:   cephNamespace,
-				Name:        "osd_objects_backfilled",
-				Help:        "Average number of objects backfilled in an OSD",
-				ConstLabels: labels,
-			},
-			append([]string{"pgid"}, osdLabels...),
-		),
-		*/
-
-		/*
-		OldestInactivePG: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace:   cephNamespace,
-				Name:        "pg_oldest_inactive",
-				Help:        "The amount of time in seconds that the oldest PG has been inactive for",
-				ConstLabels: labels,
-			},
-		),
-		*/
 	}
 
-	// go o.oldestInactivePGLoop()
 	return o
 }
 
 func (o *OSDCollector) collectorList() []prometheus.Collector {
 	return []prometheus.Collector{
-		// o.CrushWeight,
-		// o.Depth,
-		// o.Reweight,
-		// o.Bytes,
-		// o.UsedBytes,
-		// o.AvailBytes,
-		// o.Utilization,
-		// o.Variance,
-		// o.Pgs,
-		o.PgUpmapItemsTotal,
-		o.TotalBytes,
-		o.TotalUsedBytes,
-		o.TotalAvailBytes,
-		o.AverageUtil,
 		o.CommitLatency,
 		o.ApplyLatency,
-		// o.OSDIn,
-		// o.OSDUp,
-		// o.OSDMetadata,
-		// o.OSDFullRatio,
-		// o.OSDNearFullRatio,
-		// o.OSDBackfillFullRatio,
-		// o.OSDFull,
-		// o.OSDNearFull,
-		// o.OSDBackfillFull,
-		// o.OSDObjectsBackfilled,
-		// o.OldestInactivePG,
 	}
 }
 
 type cephOSDDF struct {
 	OSDNodes []struct {
-		Name        string      `json:"name"`
-		// CrushWeight json.Number `json:"crush_weight"`
-		// Depth       json.Number `json:"depth"`
-		// Reweight    json.Number `json:"reweight"`
-		KB          json.Number `json:"kb"`
-		UsedKB      json.Number `json:"kb_used"`
-		AvailKB     json.Number `json:"kb_avail"`
-		Utilization json.Number `json:"utilization"`
-		// Variance    json.Number `json:"var"`
-		// Pgs         json.Number `json:"pgs"`
+		Name string `json:"name"`
 	} `json:"nodes"`
 
 	Summary struct {
@@ -553,24 +131,6 @@ type CephOSDPerfStat struct {
 		} `json:"perf_stats"`
 	} `json:"osd_perf_infos"`
 }
-
-
-/*
-type cephPerfStat struct {
-	PerfInfo []struct {
-		ID    json.Number `json:"id"`
-		Stats struct {
-			CommitLatency json.Number `json:"commit_latency_ms"`
-			ApplyLatency  json.Number `json:"apply_latency_ms"`
-		} `json:"perf_stats"`
-	} `json:"osd_perf_infos"`
-}
-
-
-type CephOSDPerfStat struct {
-	cephPerfStat `json:"osdstats"`
-}
-*/
 
 type cephOSDDump struct {
 	OSDs []struct {
@@ -647,13 +207,6 @@ type cephOSDLabel struct {
 	parent      int64   // parent id when building tables
 }
 
-type cephOSDMetadata struct {
-	ID                     int    `json:"id"`
-	CephVersionWhenCreated string `json:"ceph_version_when_created"`
-	CreatedAt              string `json:"created_at"`
-	OsdObjectstore         string `json:"osd_objectstore"`
-}
-
 func (o *OSDCollector) collectOSDDF() error {
 	args := o.cephOSDDFCommand()
 	buf, _, err := o.conn.MgrCommand(args)
@@ -661,170 +214,23 @@ func (o *OSDCollector) collectOSDDF() error {
 		o.logger.WithError(err).WithField(
 			"args", string(bytes.Join(args, []byte(","))),
 		).Error("error executing mgr command")
-
 		return err
 	}
 
-	// Workaround for Ceph Jewel after 10.2.5 produces invalid json when OSD is out
 	buf = bytes.Replace(buf, []byte("-nan"), []byte("0"), -1)
-
 	osdDF := &cephOSDDF{}
 	if err := json.Unmarshal(buf, osdDF); err != nil {
 		return err
 	}
 
-	/*
-	for _, node := range osdDF.OSDNodes {
-		//lb := o.getOSDLabelFromName(node.Name)
-
-		// disable crush weight
-		crushWeight, err := node.CrushWeight.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.CrushWeight.WithLabelValues(node.Name).Set(crushWeight)
-
-
-		// disable depth
-		depth, err := node.Depth.Float64()
-		if err != nil {
-
-			return err
-		}
-
-		o.Depth.WithLabelValues(node.Name).Set(depth)
-
-
-
-		//  dsiable reweight
-		reweight, err := node.Reweight.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.Reweight.WithLabelValues(node.Name).Set(reweight)
-
-		// disalbe ceph osd bytes
-		osdKB, err := node.KB.Float64()
-		if err != nil {
-			return nil
-		}
-
-		o.Bytes.WithLabelValues(node.Name).Set(osdKB * 1024)
-
-		//
-		usedKB, err := node.UsedKB.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.UsedBytes.WithLabelValues(node.Name).Set(usedKB * 1024)
-
-
-		// disable ceph_osd_avail_bytes
-		availKB, err := node.AvailKB.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.AvailBytes.WithLabelValues(node.Name).Set(availKB * 1024)
-
-
-		//
-		util, err := node.Utilization.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.Utilization.WithLabelValues(node.Name).Set(util)
-
-
-		// disable
-		variance, err := node.Variance.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.Variance.WithLabelValues(node.Name).Set(variance)
-
-
-		// disalbe
-		pgs, err := node.Pgs.Float64()
-		if err != nil {
-			continue
-		}
-
-		o.Pgs.WithLabelValues(node.Name).Set(pgs)
-
-	}
-	*/
-
-	totalKB, err := osdDF.Summary.TotalKB.Float64()
-	if err != nil {
-		return err
-	}
-
-	o.TotalBytes.Set(totalKB * 1024)
-
-	totalUsedKB, err := osdDF.Summary.TotalUsedKB.Float64()
-	if err != nil {
-		return err
-	}
-
-	o.TotalUsedBytes.Set(totalUsedKB * 1024)
-
-	totalAvailKB, err := osdDF.Summary.TotalAvailKB.Float64()
-	if err != nil {
-		return err
-	}
-
-	o.TotalAvailBytes.Set(totalAvailKB * 1024)
-
-	averageUtil, err := osdDF.Summary.AverageUtil.Float64()
-	if err != nil {
-		return err
-	}
-
-	o.AverageUtil.Set(averageUtil)
-
 	return nil
 }
-
-/*
-func (o *OSDCollector) collectOSDMetadata() error {
-	cmd := o.cephOSDMetadataCommand()
-	buf, _, err := o.conn.MonCommand(cmd)
-	if err != nil {
-		o.logger.WithError(err).WithField(
-			"args", string(cmd),
-		).Error("error executing mon command")
-
-		return err
-	}
-
-	var osdMetadata []cephOSDMetadata
-	if err := json.Unmarshal(buf, &osdMetadata); err != nil {
-		return err
-	}
-
-
-	for _, osd := range osdMetadata {
-		o.OSDMetadata.WithLabelValues(strconv.Itoa(osd.ID), osd.OsdObjectstore, osd.CephVersionWhenCreated, osd.CreatedAt).Set(1)
-	}
-
-	return nil
-}
-*/
-
 
 func (o *OSDCollector) collectOSDPerf() error {
-
 	o.logger.Debug("osd perf r")
 
 	args := o.cephOSDPerfCommand()
 	buf, _, err := o.conn.MgrCommand(args)
-
 	if err != nil {
 		o.logger.WithError(err).WithField(
 			"args", string(bytes.Join(args, []byte(","))),
@@ -833,7 +239,6 @@ func (o *OSDCollector) collectOSDPerf() error {
 	}
 
 	o.logger.Debugf("osd perf raw output: %s", string(buf))
-
 	osdPerf := &CephOSDPerfStat{}
 	if err := json.Unmarshal(buf, osdPerf); err != nil {
 		return err
@@ -845,8 +250,6 @@ func (o *OSDCollector) collectOSDPerf() error {
 			return err
 		}
 		osdName := fmt.Sprintf(osdLabelFormat, osdID)
-
-		// lb := o.getOSDLabelFromID(osdID)
 
 		commitLatency, err := perfStat.Stats.CommitLatency.Float64()
 		if err != nil {
@@ -883,7 +286,7 @@ func buildOSDLabels(data []byte) (map[int64]*cephOSDLabel, error) {
 		}
 		nodeMap[node.ID] = &label
 	}
-	// now that we built a lookup table, fill in the parents
+
 	for _, node := range nodeList.Nodes {
 		for _, child := range node.Children {
 			if label, ok := nodeMap[child]; ok {
@@ -903,7 +306,6 @@ func buildOSDLabels(data []byte) (map[int64]*cephOSDLabel, error) {
 		return nil, false
 	}
 
-	// Now that we have parents filled in walk our map, and build a map of just osds.
 	for k := range nodeMap {
 		osdLabel := nodeMap[k]
 		if host, ok := findParent(osdLabel, "host"); ok {
@@ -933,7 +335,6 @@ func (o *OSDCollector) buildOSDLabelCache() error {
 		o.logger.WithError(err).WithField(
 			"args", string(cmd),
 		).Error("error executing mon command")
-
 		return err
 	}
 
@@ -958,7 +359,6 @@ func (o *OSDCollector) getOSDLabelFromName(osdid string) *cephOSDLabel {
 	if err != nil || c != 1 {
 		return &cephOSDLabel{}
 	}
-
 	return o.getOSDLabelFromID(id)
 }
 
@@ -969,7 +369,6 @@ func (o *OSDCollector) collectOSDTreeDown(ch chan<- prometheus.Metric) error {
 		o.logger.WithError(err).WithField(
 			"args", string(cmd),
 		).Error("error executing mon command")
-
 		return err
 	}
 
@@ -983,10 +382,7 @@ func (o *OSDCollector) collectOSDTreeDown(ch chan<- prometheus.Metric) error {
 		if downItem.Type != "osd" {
 			continue
 		}
-
 		osdName := downItem.Name
-		// lb := o.getOSDLabelFromName(osdName)
-
 		ch <- prometheus.MustNewConstMetric(o.OSDDownDesc, prometheus.GaugeValue, 1,
 			downItem.Status,
 			osdName)
@@ -1002,7 +398,6 @@ func (o *OSDCollector) collectOSDDump() error {
 		o.logger.WithError(err).WithField(
 			"args", string(cmd),
 		).Error("error executing mon command")
-
 		return err
 	}
 
@@ -1010,72 +405,8 @@ func (o *OSDCollector) collectOSDDump() error {
 	if err := json.Unmarshal(buff, &osdDump); err != nil {
 		return err
 	}
-
-	/*
-	osdFullRatio, err := osdDump.FullRatio.Float64()
-	if err != nil {
-		return err
-	}
-	osdNearFullRatio, err := osdDump.NearFullRatio.Float64()
-	if err != nil {
-		return err
-	}
-	osdBackfillFullRatio, err := osdDump.BackfillFullRatio.Float64()
-	if err != nil {
-		return err
-	}
-	/*
-
-	 */
-	// o.OSDFullRatio.Set(osdFullRatio)
-	// o.OSDNearFullRatio.Set(osdNearFullRatio)
-
-	// o.OSDBackfillFullRatio.Set(osdBackfillFullRatio)
-	// o.PgUpmapItemsTotal.Set(float64(len(osdDump.PgUpmapItems)))
-        /*
-	for _, dumpInfo := range osdDump.OSDs {
-		osdID, err := dumpInfo.OSD.Int64()
-		if err != nil {
-			return err
-		}
-		osdName := fmt.Sprintf(osdLabelFormat, osdID)
-
-		lb := o.getOSDLabelFromID(osdID)
-
-		in, err := dumpInfo.In.Float64()
-		if err != nil {
-			return err
-		}
-
-		o.OSDIn.WithLabelValues(osdName).Set(in)
-
-		up, err := dumpInfo.Up.Float64()
-		if err != nil {
-			return err
-		}
-		// o.OSDUp.WithLabelValues(osdName).Set(up)
-
-		// o.OSDFull.WithLabelValues(osdName).Set(0)
-		// o.OSDNearFull.WithLabelValues(osdName).Set(0)
-		o.OSDBackfillFull.WithLabelValues(osdName).Set(0)
-		for _, state := range dumpInfo.State {
-			switch state {
-			case "full":
-				o.OSDFull.WithLabelValues(osdName).Set(1)
-			case "nearfull":
-				o.OSDNearFull.WithLabelValues(osdName).Set(1)
-			case "backfillfull":
-				o.OSDBackfillFull.WithLabelValues(osdName).Set(1)
-			}
-		}
-	}
-	*/
-
 	return nil
-
 }
-
-
 
 func (o *OSDCollector) performPGDumpBrief() (*cephPGDumpBrief, error) {
 	args := o.cephPGDumpCommand()
@@ -1087,15 +418,11 @@ func (o *OSDCollector) performPGDumpBrief() (*cephPGDumpBrief, error) {
 		return nil, err
 	}
 
-	// 兼容对象 + 数组两种格式
 	var pgDumpBrief cephPGDumpBrief
-
-	// 先尝试解析为对象
 	if err := json.Unmarshal(buf, &pgDumpBrief); err == nil {
 		return &pgDumpBrief, nil
 	}
 
-	// 失败则解析为数组
 	var pgStats []struct {
 		PGID          string `json:"pgid"`
 		ActingPrimary int64  `json:"acting_primary"`
@@ -1107,78 +434,12 @@ func (o *OSDCollector) performPGDumpBrief() (*cephPGDumpBrief, error) {
 		return &pgDumpBrief, nil
 	}
 
-	// 兜底
 	return &cephPGDumpBrief{PGStats: []struct {
 		PGID          string `json:"pgid"`
 		ActingPrimary int64  `json:"acting_primary"`
 		Acting        []int  `json:"acting"`
 		State         string `json:"state"`
 	}{}}, nil
-}
-
-
-
-/*
-func (o *OSDCollector) performPGDumpBrief() (*cephPGDumpBrief, error) {
-	args := o.cephPGDumpCommand()
-	buf, _, err := o.conn.MgrCommand(args)
-	if err != nil {
-		o.logger.WithError(err).WithField(
-			"args", string(bytes.Join(args, []byte(","))),
-		).Error("error executing mgr command")
-
-		return nil, err
-	}
-
-	pgDumpBrief := cephPGDumpBrief{}
-	if err := json.Unmarshal(buf, &pgDumpBrief); err != nil {
-		return nil, err
-	}
-
-	return &pgDumpBrief, nil
-}
-*/
-
-
-
-func (o *OSDCollector) collectOSDScrubState(ch chan<- prometheus.Metric) error {
-	pgDumpBrief, err := o.performPGDumpBrief()
-	if err != nil {
-		return err
-	}
-
-	// need to reset the PG scrub state since the scrub might have ended within
-	// the last prom scrape interval.
-	// This forces us to report scrub state on all previously discovered OSDs We
-	// may be able to remove the "cache" when using Prometheus 2.0 if we can
-	// tune how unreported/abandoned gauges are treated (ie set to 0).
-	for i := range o.osdScrubCache {
-		o.osdScrubCache[i] = scrubStateIdle
-	}
-
-	for _, pg := range pgDumpBrief.PGStats {
-		if strings.Contains(pg.State, "scrubbing") {
-			scrubState := scrubStateScrubbing
-			if strings.Contains(pg.State, "deep") {
-				scrubState = scrubStateDeepScrubbing
-			}
-
-			for _, osd := range pg.Acting {
-				o.osdScrubCache[osd] = scrubState
-			}
-		}
-	}
-
-	for i, v := range o.osdScrubCache {
-		//lb := o.getOSDLabelFromID(int64(i))
-		ch <- prometheus.MustNewConstMetric(
-			o.ScrubbingStateDesc,
-			prometheus.GaugeValue,
-			float64(v),
-			fmt.Sprintf(osdLabelFormat, i))
-	}
-
-	return nil
 }
 
 func (o *OSDCollector) cephOSDDump() []byte {
@@ -1203,31 +464,15 @@ func (o *OSDCollector) cephOSDDFCommand() [][]byte {
 	return [][]byte{cmd}
 }
 
-
 func (o *OSDCollector) cephOSDPerfCommand() [][]byte {
 	cmd, err := json.Marshal(map[string]interface{}{
 		"prefix": "osd perf",
 		"format": jsonFormat,
 	})
-
 	if err != nil {
 		o.logger.WithError(err).Panic("error marshalling ceph osd perf")
 	}
-
 	return [][]byte{cmd}
-}
-
-
-
-func (o *OSDCollector) cephOSDMetadataCommand() []byte {
-	cmd, err := json.Marshal(map[string]interface{}{
-		"prefix": "osd metadata",
-		"format": jsonFormat,
-	})
-	if err != nil {
-		o.logger.WithError(err).Panic("error marshalling ceph osd metadata")
-	}
-	return cmd
 }
 
 func (o *OSDCollector) cephOSDTreeCommand(states ...string) []byte {
@@ -1238,7 +483,6 @@ func (o *OSDCollector) cephOSDTreeCommand(states ...string) []byte {
 	if len(states) > 0 {
 		req["states"] = states
 	}
-
 	cmd, err := json.Marshal(req)
 	if err != nil {
 		o.logger.WithError(err).Panic("error marshalling ceph osd tree")
@@ -1258,167 +502,29 @@ func (o *OSDCollector) cephPGDumpCommand() [][]byte {
 	return [][]byte{cmd}
 }
 
-func (o *OSDCollector) oldestInactivePGLoop() {
-	for {
-		pgDumpBrief, err := o.performPGDumpBrief()
-		if err != nil {
-			o.logger.WithError(err).Warning("failed to get latest PG dump for oldest inactive PG update")
-			time.Sleep(oldestInactivePGUpdatePeriod)
-			continue
-		}
-
-		// - See if there are PGs that we're tracking that are now active
-		// - See if there are new ones to add
-		// - Find the oldest one
-		now := time.Now()
-		oldestTime := now
-
-		for _, pg := range pgDumpBrief.PGStats {
-			// If we were tracking it, and it's now active, remove it
-			active := strings.Contains(pg.State, "active")
-			if active {
-				delete(o.oldestInactivePGMap, pg.PGID)
-				continue
-			}
-
-			// Now see if it's not here, we'll need to track it now
-			pgTime, ok := o.oldestInactivePGMap[pg.PGID]
-			if !ok {
-				pgTime = now
-				o.oldestInactivePGMap[pg.PGID] = now
-			}
-
-			// And finally, track our oldest time
-			if pgTime.Before(oldestTime) {
-				oldestTime = pgTime
-			}
-		}
-
-		// o.OldestInactivePG.Set(float64(now.Unix() - oldestTime.Unix()))
-
-		time.Sleep(oldestInactivePGUpdatePeriod)
-	}
-}
-
-// Describe sends the descriptors of each OSDCollector related metrics we have
-// defined to the provided Prometheus channel.
+// Describe sends metric descriptors
 func (o *OSDCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, metric := range o.collectorList() {
 		metric.Describe(ch)
 	}
 	ch <- o.OSDDownDesc
-	ch <- o.ScrubbingStateDesc
 	ch <- o.PGObjectsRecoveredDesc
 }
 
-
-
-
-/*
-// Collect sends all the collected metrics to the provided Prometheus channel.
-// It requires the caller to handle synchronization.
+// Collect collects metrics
 func (o *OSDCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
-	// Reset daemon specific metrics; daemons can leave the cluster
-	// o.CrushWeight.Reset()
-	// o.Depth.Reset()
-	// o.Reweight.Reset()  ++1
-	// o.Bytes.Reset()
-	// o.UsedBytes.Reset()
-	// o.AvailBytes.Reset()
-	// o.Utilization.Reset()
-	// o.Variance.Reset()
-	// o.Pgs.Reset()
-	// o.OSDIn.Reset()
-	// o.OSDUp.Reset()
-	// o.OSDMetadata.Reset()
-	o.CommitLatency.Reset()
-	o.ApplyLatency.Reset()
-	o.buildOSDLabelCache()
-
-	localWg := &sync.WaitGroup{}
-
-	o.logger.Debug("osd perf bbbb")
-
-	localWg.Add(1)
-	go func() {
-		defer localWg.Done()
-		if err := o.collectOSDPerf(); err != nil {
-			o.logger.WithError(err).Error("error collecting OSD perf metrics")
-		}
-	}()
-
-	
-	//localWg.Add(1)
-	//go func() {
-	//	defer localWg.Done()
-	//	if err := o.collectOSDMetadata(); err != nil {
-	//		o.logger.WithError(err).Error("error collecting OSD metadata metrics")
-	//	}
-	//}()
-	
-
-	localWg.Add(1)
-	go func() {
-		defer localWg.Done()
-		if err := o.collectOSDDump(); err != nil {
-			o.logger.WithError(err).Error("error collecting OSD dump metrics")
-		}
-	}()
-
-	localWg.Add(1)
-	go func() {
-		defer localWg.Done()
-		if err := o.collectOSDDF(); err != nil {
-			o.logger.WithError(err).Error("error collecting OSD df metrics")
-		}
-	}()
-
-	localWg.Add(1)
-	go func() {
-		defer localWg.Done()
-		if err := o.collectOSDTreeDown(ch); err != nil {
-			o.logger.WithError(err).Error("error collecting OSD tree down metrics")
-		}
-	}()
-
-	localWg.Add(1)
-	go func() {
-		defer localWg.Done()
-		if err := o.collectOSDScrubState(ch); err != nil {
-			o.logger.WithError(err).Error("error collecting OSD scrub metrics")
-		}
-	}()
-
-	localWg.Wait()
-
-	for _, metric := range o.collectorList() {
-		metric.Collect(ch)
-	}
-}
-*/
-
-
-// Collect sends all the collected metrics to the provided Prometheus channel.
-// It requires the caller to handle synchronization.
-func (o *OSDCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
-	// 🔥增加 OSD 采集独立超时：8 秒
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
-	// 重置指标
 	o.CommitLatency.Reset()
 	o.ApplyLatency.Reset()
 
-	// 用于等待采集完成
 	done := make(chan struct{})
 
 	go func() {
-		// 内部逻辑不变
 		o.buildOSDLabelCache()
 
 		localWg := &sync.WaitGroup{}
-
-		o.logger.Debug("osd perf bbbb")
 
 		localWg.Add(1)
 		go func() {
@@ -1452,28 +558,17 @@ func (o *OSDCollector) Collect(ch chan<- prometheus.Metric, version *Version) {
 			}
 		}()
 
-		localWg.Add(1)
-		go func() {
-			defer localWg.Done()
-			if err := o.collectOSDScrubState(ch); err != nil {
-				o.logger.WithError(err).Error("error collecting OSD scrub metrics")
-			}
-		}()
-
 		localWg.Wait()
 		close(done)
 	}()
 
-	// 等待完成 或 超时
 	select {
 	case <-done:
-		// 正常完成
 	case <-ctx.Done():
 		o.logger.Warn("⚠️ OSD collector timed out after 8s, skipping this scrape")
 		return
 	}
 
-	// 发送指标
 	for _, metric := range o.collectorList() {
 		metric.Collect(ch)
 	}
