@@ -255,13 +255,13 @@ func (o *OSDCollector) collectOSDPerf() error {
 		if err != nil {
 			return err
 		}
-		o.CommitLatency.WithLabelValues(osdName).Set(commitLatency / 1000)
+		o.CommitLatency.WithLabelValues(osdName).Set(commitLatency)
 
 		applyLatency, err := perfStat.Stats.ApplyLatency.Float64()
 		if err != nil {
 			return err
 		}
-		o.ApplyLatency.WithLabelValues(osdName).Set(applyLatency / 1000)
+		o.ApplyLatency.WithLabelValues(osdName).Set(applyLatency)
 	}
 
 	return nil
