@@ -107,7 +107,7 @@ func (c *CephExporter) Collect(ch chan<- prometheus.Metric) {
 func main() {
 	var (
 		versionExporter  = "1.0.0-ceph-10"
-		addr        = flag.String("telemetry.addr", ":9128", "host:port for ceph exporter")
+		addr        = flag.String("telemetry.addr", ":9283", "host:port for ceph exporter")
 		metricsPath = flag.String("telemetry.path", "/metrics", "URL path for surfacing collected metrics")
 		cephConfig  = flag.String("ceph.config", "", "path to ceph config file")
 		cephUser    = flag.String("ceph.user", "admin", "Ceph user to connect to cluster.")
