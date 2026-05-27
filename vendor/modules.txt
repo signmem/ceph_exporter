@@ -1,0 +1,37 @@
+# github.com/beorn7/perks v0.0.0-20160804104726-4c0e84591b9a
+## explicit
+github.com/beorn7/perks/quantile
+# github.com/ceph/go-ceph v0.0.0-20170120174755-25b1a318b387
+## explicit
+github.com/ceph/go-ceph/rados
+# github.com/golang/protobuf v0.0.0-20170331031902-2bba0603135d
+## explicit
+github.com/golang/protobuf/proto
+# github.com/matttproud/golang_protobuf_extensions v1.0.1
+## explicit
+github.com/matttproud/golang_protobuf_extensions/pbutil
+# github.com/prometheus/client_golang v0.9.0-pre1.0.20170921105543-353b8c3f3776
+## explicit
+github.com/prometheus/client_golang/prometheus
+github.com/prometheus/client_golang/prometheus/promhttp
+# github.com/prometheus/client_model v0.0.0-20170216185247-6f3806018612
+## explicit
+github.com/prometheus/client_model/go
+# github.com/prometheus/common v0.0.0-20170427095455-13ba4ddd0caa
+## explicit
+github.com/prometheus/common/expfmt
+github.com/prometheus/common/internal/bitbucket.org/ww/goautoneg
+github.com/prometheus/common/model
+# github.com/prometheus/procfs v0.0.0-20170424204552-6ac8c5d890d4
+## explicit
+github.com/prometheus/procfs
+github.com/prometheus/procfs/xfs
+# github.com/stretchr/testify v1.11.1
+## explicit; go 1.17
+# golang.org/x/sync v0.20.0
+## explicit; go 1.25.0
+# gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
+## explicit; go 1.11
+# gopkg.in/yaml.v2 v2.0.0-20170407172122-cd8b52f8269e
+## explicit
+gopkg.in/yaml.v2
